@@ -2,6 +2,7 @@
 #define HASHTABLE_H
 
 #include <optional>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -38,16 +39,25 @@ private:
 
         [[nodiscard]] std::string getKey() const;
         [[nodiscard]] size_t getValue() const;
+        size_t& getValueRef();
         [[nodiscard]] BucketType getType() const;
 
         [[nodiscard]] bool isEmpty() const; // Predicate for determining if bucket is empty
 
-        void load(const std::string& key, const size_t& value); // Fills bucket with key-value pair
+        void load(const std::string& inKey, const size_t& inValue); // Fills bucket with key-value pair
+        void unload();
     };
 
     std::vector<HashTableBucket> tableData; // The Hash Table itself, implemented as a vector of HashTableBucket elements
     std::vector<size_t> offsets; // Offsets for pseudo-random probing
     size_t numFilled; // The number of filled buckets in the Hash Table (NORMAL status);
+    std::mt19937 rng; // Random number generator for pseudo-random probing
+    std::hash<std::string> hash;
+    size_t badKeyDrain;
+
+    void resize(); // Double the size of the hashTable, rehashing in the process.
+    HashTableBucket* find(const std::string& key); // Find a bucket containing key-value pair with input key, or return nullptr
+    HashTableBucket* findEmpty(const std::string& key);
 
 public:
     explicit HashTable(size_t initCapacity = 8); // Default and parameterized constructor
@@ -58,9 +68,9 @@ public:
     [[nodiscard]] size_t capacity() const; // Getter for capacity (# of buckets in table)
     [[nodiscard]] size_t size() const; // Getter for size (# of filled buckets in table)
     [[nodiscard]] std::vector<std::string> keys() const; // Getter for list of keys currently used in table
-    [[nodiscard]] std::optional<size_t> get(const std::string& key) const; // Getter for value stored using given key
+    [[nodiscard]] std::optional<size_t> get(const std::string& key); // Getter for value stored using given key
 
-    [[nodiscard]] bool contains(const std::string& key) const; // Predicate for determining whether given key is used in table
+    [[nodiscard]] bool contains(const std::string& key); // Predicate for determining whether given key is used in table
 
     bool insert(const std::string& key, const size_t& value); // Insert key-value pair into table, resizing if required
     bool remove(const std::string& key); // Remove key-value pair from table
