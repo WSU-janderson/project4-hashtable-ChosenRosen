@@ -42,7 +42,9 @@ private:
         size_t& getValueRef();
         [[nodiscard]] BucketType getType() const;
 
-        [[nodiscard]] bool isEmpty() const; // Predicate for determining if bucket is empty
+        [[nodiscard]] bool isEmpty() const; // Predicate for determining if bucket is empty (type == ESS or EAR)
+        [[nodiscard]] bool isEAR() const; // Predicate for determining if bucket type is EAR (tombstone)
+        [[nodiscard]] bool isESS() const; // Predicate for determining if bucket type is ESS
 
         void load(const std::string& inKey, const size_t& inValue); // Fills bucket with key-value pair
         void unload();
@@ -57,7 +59,6 @@ private:
 
     void resize(); // Double the size of the hashTable, rehashing in the process.
     HashTableBucket* find(const std::string& key); // Find a bucket containing key-value pair with input key, or return nullptr
-    HashTableBucket* findEmpty(const std::string& key);
 
 public:
     explicit HashTable(size_t initCapacity = 8); // Default and parameterized constructor
@@ -72,7 +73,7 @@ public:
 
     [[nodiscard]] bool contains(const std::string& key); // Predicate for determining whether given key is used in table
 
-    bool insert(const std::string& key, const size_t& value); // Insert key-value pair into table, resizing if required
+    bool insert(const std::string& key, const size_t& value, bool skipResizeCheckFlag = false); // Insert key-value pair into table, resizing if required
     bool remove(const std::string& key); // Remove key-value pair from table
 
     friend std::ostream& operator<<(std::ostream& os, const HashTableBucket& bucket); // Stream insertion operator overload HashTableBucket

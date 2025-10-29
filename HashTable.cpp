@@ -7,18 +7,17 @@
 #include "HashTable.h"
 #include <algorithm>
 #include <iostream>
-#include <random>
 
 /**
 * Only a single constructor that takes an initial capacity for the table is
 * necessary. If no capacity is given, it defaults to 8 initially.
 */
 HashTable::HashTable(const size_t initCapacity) :
-    tableData(initCapacity), offsets(initCapacity-1), numFilled(0), rng(std::random_device{}()), badKeyDrain(0) {
-    for (size_t i = 0; i < initCapacity-1; ++i) {
-        offsets[i] = i + 1;
+    tableData(initCapacity), offsets(initCapacity), numFilled(0), rng(std::random_device{}()), badKeyDrain(0) {
+    for (size_t i = 0; i < initCapacity; ++i) {
+        offsets[i] = i;
     }
-    std::ranges::shuffle(offsets, rng);
+    std::ranges::shuffle(offsets.begin() + 1, offsets.end(), rng);
 }
 
 /**
@@ -75,8 +74,7 @@ size_t HashTable::size() const {
 */
 std::vector<std::string> HashTable::keys() const {
     std::vector<std::string> keyList(numFilled);
-    size_t keyListIndex = 0;
-    for (size_t bucketNum = 0; bucketNum < capacity(); ++bucketNum) {
+    for (size_t keyListIndex = 0, bucketNum = 0; bucketNum < capacity(); ++bucketNum) {
         if (const HashTableBucket *currBucket = &tableData.at(bucketNum);
         !currBucket->isEmpty()) {
             keyList.at(keyListIndex) = currBucket->getKey();
@@ -119,12 +117,21 @@ bool HashTable::contains(const std::string& key) {
 * unsuccessful, such as when a duplicate is attempted to be inserted, the method
 * should return false
 */
-bool HashTable::insert(const std::string& key, const size_t& value) {
-    if (HashTableBucket* foundBucket = findEmpty(key); foundBucket != nullptr) {
-        foundBucket->load(key,value);
-        ++numFilled;
-        if (alpha() >= 0.5) {resize();}
-        return true;
+bool HashTable::insert(const std::string& key, const size_t& value, const bool skipResizeCheckFlag) {
+    const size_t home = hash(key) % capacity();
+    for (size_t probeNum = 0; probeNum < offsets.size(); ++probeNum) {
+        HashTableBucket* currBucket = &tableData.at((home + offsets.at(probeNum)) % capacity());
+        if (currBucket->isEmpty()) {
+            currBucket->load(key,value);
+            ++numFilled;
+            if (!skipResizeCheckFlag && alpha() >= 0.5) {
+                resize();
+            }
+            return true;
+        }
+        if (key == currBucket->getKey()) {
+            return false;
+        }
     }
     return false; // This line should never be reached if resizing functions correctly
 }
@@ -148,42 +155,29 @@ void HashTable::resize() {
     for (size_t bucketNum = 0; bucketNum < capacity(); ++bucketNum) {
         if (const HashTableBucket *currBucket = &tableData.at(bucketNum);
         !currBucket->isEmpty()) {
-            newTable.insert(currBucket->getKey(),currBucket->getValue());
+            newTable.insert(currBucket->getKey(),currBucket->getValue(),true);
         }
-        // Does this assignment operator (vector) correctly deallocate the old hashTable?
-        this->tableData = newTable.tableData;
     }
-
+    this->tableData = newTable.tableData;
+    this->offsets = newTable.offsets;
+    this->numFilled = newTable.numFilled;
 }
 
 HashTable::HashTableBucket* HashTable::find(const std::string& key) {
     const size_t home = hash(key) % capacity();
-    HashTableBucket* currBucket = &tableData.at(home);
-    if (currBucket->getKey() == key) {
-        return currBucket;
-    }
     for (size_t probeNum = 0; probeNum < offsets.size(); ++probeNum) {
-        currBucket = &tableData.at((home + offsets.at(probeNum)) % capacity());
+        HashTableBucket* currBucket = &tableData.at((home + offsets.at(probeNum)) % capacity());
+        if (currBucket->isESS()) {
+            return nullptr;
+        }
+        if (currBucket->isEAR()) {
+            continue;
+        }
         if (currBucket->getKey() == key) {
             return currBucket;
         }
     }
-    return nullptr;
-}
-
-HashTable::HashTableBucket* HashTable::findEmpty(const std::string& key) {
-    const size_t home = hash(key) % capacity();
-    HashTableBucket* currBucket = &tableData.at(home);
-    if (currBucket->isEmpty()) {
-        return currBucket;
-    }
-    for (size_t probeNum = 0; probeNum < offsets.size(); ++probeNum) {
-        currBucket = &tableData.at((home + offsets.at(probeNum)) % capacity());
-        if (currBucket->isEmpty()) {
-            return currBucket;
-        }
-    }
-    return nullptr;
+    return nullptr; // Will only be reached if key is not in table and no ESS remain
 }
 
 /**
@@ -223,6 +217,14 @@ HashTable::HashTableBucket::BucketType HashTable::HashTableBucket::getType() con
 */
 bool HashTable::HashTableBucket::isEmpty() const {
     return type != BucketType::NORMAL;
+}
+
+bool HashTable::HashTableBucket::isEAR() const {
+    return type == BucketType::EAR;
+}
+
+bool HashTable::HashTableBucket::isESS() const {
+    return type == BucketType::ESS;
 }
 
 /**
@@ -271,7 +273,7 @@ std::ostream& operator<<(std::ostream& os, const HashTable::HashTableBucket& buc
 std::ostream& operator<<(std::ostream& os, const HashTable& hashTable) {
     for (size_t bucketNum = 0; bucketNum < hashTable.capacity(); ++bucketNum) {
         if (HashTable::HashTableBucket currBucket = hashTable.tableData.at(bucketNum);
-        currBucket.getType() == HashTable::HashTableBucket::BucketType::NORMAL) {
+        !currBucket.isEmpty()) {
             os << "Bucket " << bucketNum << ": " << currBucket << std::endl;
         }
     }
