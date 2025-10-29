@@ -8,7 +8,7 @@
 
 int main() {
     HashTable myTable;
-    std::cout << "Empty Table:" << myTable << "__end__" << std::endl;
+    std::cout << "Empty Table:" << std::endl << myTable << "__end__" << std::endl;
 
     std::cout << "Successful insertions...";
     std::cout << myTable.insert("one",1);
