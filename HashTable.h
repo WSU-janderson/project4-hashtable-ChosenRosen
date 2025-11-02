@@ -20,10 +20,10 @@
  * Hash Table is stored internally as a std::vector.
  * Uses the hash template of the std library as applied to strings (std::hash<std::string>) for the hash function.
  * Uses pseudo-random probing for collision resolution.
- * Rehashes whenever load factor reaches or exceeds 0.5, at which point the table doubles in size.
+ * Rehashes whenever load factor reaches or exceeds a provided threshold (defualt 0.5), at which point the table doubles in size.
  *
  * @author Greg Rosen
- * @date October 28, 2025
+ * @date November 2, 2025
  */
 class HashTable {
 private:
@@ -31,7 +31,6 @@ private:
      * @class HashTableBucket
      * @brief Bucket for HashTable
      *
-     * Bucket for Hash Table
      * Stores key, value, and type
      */
     class HashTableBucket {
@@ -59,7 +58,6 @@ private:
         [[nodiscard]] std::string getKey() const; // Getter for key stored in hash table bucket.
         [[nodiscard]] size_t getValue() const; // Getter for value stored in hash table bucket.
         [[nodiscard]] size_t& getValueRef(); // Getter for reference to value stored in hash table bucket.
-        [[nodiscard]] BucketType getType() const; // Getter for type of hash table bucket.
 
         [[nodiscard]] bool isEmpty() const; // Predicate for determining if bucket is empty.
         [[nodiscard]] bool isEAR() const; // Predicate for determining if bucket is tombstone.
@@ -69,17 +67,21 @@ private:
         void unload(); // Empties bucket.
     };
 
-    std::vector<HashTableBucket> tableData; // The Hash Table itself, implemented as a vector of HashTableBucket elements.
+    const double threshold; // The load factor threshold for rehashing (default 0.5).
+    const double resizeFactor; // The factor by which the capacity of the hash table will be increased upon rehashing (default 2.0).
+
+    std::vector<HashTableBucket> tableData; // The hash table itself, implemented as a vector of HashTableBucket elements.
     std::vector<size_t> offsets; // Offsets for pseudo-random probing.
     size_t numFilled; // The number of filled buckets in the hash table.
     std::hash<std::string> hash; // Using () overload, effectively provides hash function size_t hash(std::string)
     size_t badKeyDrain; // Dummy variable for capturing invalid uses of subscript operator.
 
-    void rehash(); // Rehashes the table, doubling its size.
-    HashTableBucket* find(const std::string& key); // Returns pointer to a bucket containing the given key, or returns nullptr.
+    void rehash(); // Rehashes the table, increasing its size.
+    bool insertIntoNewTable(const std::string& key, const size_t& value); // Insert key-value pair into a new table during rehashing.
+    HashTableBucket* find(const std::string& key); // Find bucket containing key.
 
 public:
-    explicit HashTable(size_t initCapacity = 8); // Default and parameterized constructor for hash table.
+    explicit HashTable(size_t initCapacity = 8, double inThreshold = 0.5, double inResizeFactor = 2.0); // Default and parameterized constructor for hash table.
 
     size_t& operator[](const std::string& key); // Subscript operator overload for hash table.
 
@@ -91,8 +93,11 @@ public:
 
     [[nodiscard]] bool contains(const std::string& key); // Predicate for if a given key is stored in table.
 
-    bool insert(const std::string& key, const size_t& value, bool skipResizeCheckFlag = false); // Insert key-value pair into table.
+    bool insert(const std::string& key, const size_t& value); // Insert key-value pair into table.
     bool remove(const std::string& key); // Remove key-value pair from table.
+
+    size_t insertTCT(const std::string& key, const size_t& value); // Time-complexity testing version of insert.
+    size_t removeTCT(const std::string& key); // Time-complexity testing version of remove.
 
     friend std::ostream& operator<<(std::ostream& os, const HashTableBucket& bucket); // Stream insertion operator overload for HashTableBucket.
     friend std::ostream& operator<<(std::ostream& os, const HashTable& hashTable); // Stream insertion operator overload for HashTable.

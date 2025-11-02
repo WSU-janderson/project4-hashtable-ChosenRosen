@@ -19,9 +19,11 @@
  * This guarantees that iterating over the offsets always probes the home location first.
  *
  * @param initCapacity Initial number of empty buckets in hash table.
+ * @param inThreshold The load factor threshold for rehashing (default 0.5).
+ * @param inResizeFactor The factor by which the capacity of the hash table will be increased upon rehashing (default 2.0).
  */
-HashTable::HashTable(const size_t initCapacity) :
-    tableData(initCapacity), offsets(initCapacity), numFilled(0), badKeyDrain(0) {
+HashTable::HashTable(const size_t initCapacity, const double inThreshold, const double inResizeFactor) :
+    threshold(inThreshold), resizeFactor(inResizeFactor), tableData(initCapacity), offsets(initCapacity), numFilled(0), badKeyDrain(0) {
     for (size_t i = 0; i < initCapacity; ++i) {
         offsets[i] = i;
     }
@@ -34,9 +36,10 @@ HashTable::HashTable(const size_t initCapacity) :
  * Allows retrieval and assignment of value associated with given key in a manner like using an array index.
  * E.G:
  * hashTable["name"] will return a reference to the value associated with the key "name" if it is in the table.
- * hashTable["name"] = 5 will change that value
+ * hashTable["name"] = 5 will change that value.
  * If the key is not in the table, the returned reference will point to a dummy numerical field of the HashTable.
- * NOTE: There is no explicit indication that the key was not present and the value is a dummy.
+ *
+ * @warning There is no explicit indication that the key was not present and the value is a dummy.
  * It is recommended that brackets only be used if the presence of the key in the table is a certainty.
  *
  * @param key Key to be searched.
@@ -64,7 +67,7 @@ size_t HashTable::capacity() const {
  * @brief Getter for size of hash table.
  *
  * The size is the total number of filled buckets in the hash table.
- * This value is tracked internally and stored in the field numFilled.
+ * This value is tracked internally and stored in the field numFilled for O(1) access.
  *
  * @return size of hash table
  */
@@ -73,12 +76,12 @@ size_t HashTable::size() const {
 }
 
 /**
- * @brief Getter for load factor of hash table.
+ * @brief Getter for load factor (alpha) of hash table.
  *
  * Calculated as the ratio between the number of filled buckets (size)
  * and the total number of buckets in the table (capacity).
  *
- * @return load factor of hash table
+ * @return load factor (alpha) of hash table
  */
 double HashTable::alpha() const {
     return static_cast<double>(size())/static_cast<double>(capacity());
@@ -88,7 +91,7 @@ double HashTable::alpha() const {
  * @brief Getter for a list of keys currently used in the hash table.
  *
  * The list is returned as a vector of strings.
- * The method may in the worst case (last bucket of table filled) iterate over every bucket in the hash table,
+ * The method may in may iterate over every bucket in the hash table,
  * so its time complexity is O(capacity).
  *
  * @return vector of keys present in the hash table.
@@ -98,7 +101,7 @@ std::vector<std::string> HashTable::keys() const {
     for (size_t keyListIndex = 0, bucketNum = 0; bucketNum < capacity(); ++bucketNum) {
         if (const HashTableBucket *currBucket = &tableData.at(bucketNum);
         !currBucket->isEmpty()) {
-            keyList.at(keyListIndex) = currBucket->getKey();
+            keyList.at(keyListIndex) = currBucket->getKey(); // Add every key found to keyList.
             ++keyListIndex;
         }
         if (keyListIndex == numFilled) {break;} // If numFilled keys found, all remaining buckets must be empty.
@@ -141,43 +144,55 @@ bool HashTable::contains(const std::string& key) {
 /**
  * @brief Insert key-value pair into table.
  *
- * The bucket to be filled is found using pseudo-random probing
+ * The bucket to be filled is found using pseudo-random probing.
  * Returns true if insertion is successful.
- * Returns false if the key is already present in the hash table.
- * Also returns false if the table is full, which should not be possible if the table
- * begins empty and is rehashed correctly after insertions.
- * If the insertion raises the load factor of the hash table to the threshold of 50%, the table is rehashed.
- * The optional parameter skipRehashCheckFlag (default false) will skip the load factor test, which is useful
- * during rehashing or any other time it is certain that the load factor will not reach the rehash threshold.
+ * Returns false if the key is already present in the hash table or hash table is full.
+ * If the insertion raises the load factor of the hash table to or above the threshold (default 0.5), the table is rehashed.
+ *
  * @param key of key-value pair to be inserted.
  * @param value Value of key-value pair to be inserted.
- * @param skipRehashCheckFlag Flag for skipping load factor check.
+ *
  * @return true if insertion successful, false otherwise.
  */
-bool HashTable::insert(const std::string& key, const size_t& value, const bool skipRehashCheckFlag) {
+bool HashTable::insert(const std::string& key, const size_t& value) {
     const size_t home = hash(key) % capacity();
-    for (size_t probeNum = 0; probeNum < offsets.size(); ++probeNum) {
-        HashTableBucket* currBucket = &tableData.at((home + offsets.at(probeNum)) % capacity());
-        if (currBucket->isEmpty()) {
-            currBucket->load(key,value);
-            ++numFilled;
-            if (!skipRehashCheckFlag && alpha() >= 0.5) {
-                rehash();
+    HashTableBucket* firstEARFound = nullptr;
+    for (const size_t offset : offsets) {
+        if (HashTableBucket* currBucket = &tableData.at((home + offset) % capacity());
+        currBucket->isEmpty()) {
+            if (currBucket->isESS()) { // If ESS bucket is encountered, insert into it or first EAR bucket found earlier during search.
+                if (firstEARFound != nullptr) {currBucket = firstEARFound;}
+                currBucket->load(key,value);
+                ++numFilled;
+                if (alpha() >= threshold) { // Rehash if necessary.
+                    rehash();
+                }
+                return true;
             }
-            return true;
+            if (firstEARFound == nullptr) { // Mark first EAR bucket found.
+                firstEARFound = currBucket;
+            }
         }
-        if (key == currBucket->getKey()) {
+        else if (key == currBucket->getKey()) { // Return false if duplicate key found.
             return false;
         }
     }
-    return false; // This line can only be reached if the table is full.
+    if (firstEARFound != nullptr) { // Insert at first EAR bucket encountered if all empty buckets are tombstones.
+        firstEARFound->load(key,value);
+        ++numFilled;
+        if (alpha() >= threshold) { // Rehash if necessary.
+            rehash();
+        }
+        return true;
+    }
+    return false; // Return false if table is full.
 }
 
 /**
  * @brief Remove key-value pair from table.
  *
  * Searches for key using the helper method find.
- * The bucket is marked EAR, making its contents inaccessible.
+ * The bucket is marked EAR (tombstone), making its contents inaccessible.
  *
  * @param key Key to be searched.
  * @return true if removal successful, false otherwise.
@@ -188,23 +203,89 @@ bool HashTable::remove(const std::string& key) {
         --numFilled;
         return true;
     }
-    return false;
+    return false; // key is not present in table
 }
 
 /**
- * @brief Rehashes the table, doubling its size.
+ * @brief Time-complexity testing version of insert.
  *
- * Doubles size of hash table and reinserts all key-value pairs
+ * Like insert, but returns number of probes required to either insert key-value pair
+ * or determine key is a duplicate or table is full.
+ * Also omits check for rehashing
+ *
+ * @param key of key-value pair to be inserted.
+ * @param value Value of key-value pair to be inserted.
+ *
+ * @return number of probes required for insertion.
+ */
+size_t HashTable::insertTCT(const std::string& key, const size_t& value) {
+    const size_t home = hash(key) % capacity();
+    HashTableBucket* firstEARFound = nullptr;
+    for (size_t probeNum = 0; probeNum < offsets.size(); ++probeNum) {
+        if (HashTableBucket* currBucket = &tableData.at((home + offsets.at(probeNum)) % capacity());
+        currBucket->isEmpty()) {
+            if (currBucket->isESS()) { // If ESS bucket is encountered, insert into it or first EAR bucket found earlier during search.
+                if (firstEARFound != nullptr) {currBucket = firstEARFound;}
+                currBucket->load(key,value);
+                ++numFilled;
+                return probeNum + 1;
+            }
+            if (firstEARFound == nullptr) { // Mark first EAR bucket found.
+                firstEARFound = currBucket;
+            }
+        }
+        else if (key == currBucket->getKey()) { // Stop searching if duplicate key found.
+            return probeNum + 1;
+        }
+    }
+    if (firstEARFound != nullptr) { // Insert at first EAR bucket encountered if all empty buckets are tombstones.
+        firstEARFound->load(key,value);
+        ++numFilled;
+    }
+    return capacity(); // Return table capacity if table is full.
+}
+
+/**
+ * @brief Time-complexity testing version of remove.
+ *
+ * Like remove, but returns number of probes required to
+ * either insert key-value pair or determine key is not in the table.
+ *
+ * @param key Key to be searched.
+ * @return number of probes required for removal.
+ */
+size_t HashTable::removeTCT(const std::string& key) {
+    const size_t home = hash(key) % capacity();
+    for (size_t probeNum = 0; probeNum < offsets.size(); ++probeNum) {
+        HashTableBucket *currBucket = &tableData.at((home + offsets.at(probeNum)) % capacity());
+        if (currBucket->isESS()) { // If ESS bucket is reached, key cannot be present in table.
+            return probeNum + 1;
+        }
+        if (currBucket->isEAR()) { // Continue probing if bucket holds tombstone.
+            continue;
+        }
+        if (currBucket->getKey() == key) { // Remove key-value pair if found.
+            currBucket->unload();
+            --numFilled;
+            return probeNum + 1;
+        }
+    }
+    return capacity(); //Will only be reached if the key is not present and the table is full or all empty buckets are tombstones.
+}
+
+/**
+ * @brief Rehashes the table, increasing its size.
+ *
+ * Increases the size of hash table by resizeFactor and reinserts all key-value pairs
  * from the older version of the table.
- * As the new table version is guaranteed to have a load factor less than 0.5,
- * load factor checking may be bypassed.
+ *
  */
 void HashTable::rehash() {
-    HashTable newTable(capacity() * 2); // A new random offsets table is created during construction.
+    HashTable newTable(capacity() * resizeFactor); // A new random offsets vector is created during construction.
     for (size_t bucketNum = 0; bucketNum < capacity(); ++bucketNum) {
         if (const HashTableBucket *currBucket = &tableData.at(bucketNum);
         !currBucket->isEmpty()) {
-            newTable.insert(currBucket->getKey(),currBucket->getValue(),true); //
+            newTable.insertIntoNewTable(currBucket->getKey(),currBucket->getValue()); // Insert key-value pair into new table.
         }
         // Stop searching for filled buckets if all filled buckets from old table version have been copied.
         if (this->numFilled == newTable.numFilled) {
@@ -216,9 +297,37 @@ void HashTable::rehash() {
 }
 
 /**
- * @brief Returns pointer to a bucket containing the given key, or returns nullptr.
+ * @brief Insert key-value pair into a new table during rehashing.
  *
- * The key is searched using pseudo-random probing.
+ * Simplified private helper version of the insert method for the case where key-value pairs are
+ * being inserted into a new table during rehashing.
+ * The check for duplicates and resizing the table are unnecessary, and elements may be inserted
+ * at the first empty bucket found.
+ *
+ * @param key of key-value pair to be inserted.
+ * @param value Value of key-value pair to be inserted.
+ *
+ * @return true if insertion successful, false otherwise.
+ */
+bool HashTable::insertIntoNewTable(const std::string& key, const size_t& value) {
+    const size_t home = hash(key) % capacity();
+    for (const size_t offset : offsets) {
+        if (HashTableBucket* currBucket = &tableData.at((home + offset) % capacity());
+        currBucket->isESS()) {
+            currBucket->load(key,value);
+            ++numFilled;
+            return true;
+        }
+    }
+    return false; // Should not be possible if resizeFactor is greater than 1.
+}
+
+
+/**
+ * @brief Find bucket containing key.
+ *
+ * Returns pointer to a bucket containing the given key, or returns nullptr.
+ * Private helper method for pseudo-random probing.
  * Returns a pointer to the bucket with the key if the search is successful.
  * Returns nullptr if the key is not present in the hash table.
  *
@@ -227,23 +336,19 @@ void HashTable::rehash() {
  */
 HashTable::HashTableBucket* HashTable::find(const std::string& key) {
     const size_t home = hash(key) % capacity();
-    for (size_t probeNum = 0; probeNum < offsets.size(); ++probeNum) {
-        HashTableBucket* currBucket = &tableData.at((home + offsets.at(probeNum)) % capacity());
+    for (const size_t offset : offsets) {
+        HashTableBucket* currBucket = &tableData.at((home + offset) % capacity());
         if (currBucket->isESS()) { // If ESS bucket is reached, key cannot be present in table.
             return nullptr;
         }
         if (currBucket->isEAR()) { // Continue probing if bucket holds tombstone.
             continue;
         }
-        if (currBucket->getKey() == key) {
+        if (currBucket->getKey() == key) { // Return bucket pointer if key found.
             return currBucket;
         }
     }
-    /*
-     * Will only be reached if the key is not present and the table is full or all empty buckets are tombstones.
-     * Represents the worst-case scenario for time complexity of key searching.
-    */
-    return nullptr;
+    return nullptr; //Will only be reached if the key is not present and the table is full or all empty buckets are tombstones.
 }
 
 /**
@@ -269,7 +374,7 @@ HashTable::HashTableBucket::HashTableBucket(const std::string& key, const size_t
 /**
  * @brief Getter for key stored in hash table bucket.
  *
- * @warning If bucket is empty, returned key will be empty string.
+ * @warning A bucket of type EAR may hold a previously removed key.
  * @return Key stored in hash table bucket.
  */
 std::string HashTable::HashTableBucket::getKey() const{
@@ -279,7 +384,7 @@ std::string HashTable::HashTableBucket::getKey() const{
 /**
  * @brief Getter for value stored in hash table bucket.
  *
- * @warning If bucket is empty, returned value will be 0. A non-empty bucket may ALSO store the value 0.
+ * @warning A bucket of type EAR may hold a previously removed key.
  * @return Value stored in hash table bucket.
  */
 size_t HashTable::HashTableBucket::getValue() const {
@@ -292,25 +397,11 @@ size_t HashTable::HashTableBucket::getValue() const {
  * For use with subscript operator overload of HashTable.
  * Allows for mutation of stored value.
  *
- * @warning If bucket is empty, returned value will be 0. A non-empty bucket may ALSO store the value 0.
+ * @warning A bucket of type EAR may hold a previously removed key.
  * @return Reference to value stored in hash table bucket.
  */
 size_t& HashTable::HashTableBucket::getValueRef() {
     return value;
-}
-
-/**
- * @brief Getter for type of hash table bucket.
- *
- * Type may be:
- * NORMAL - Bucket contains key-value pair.
- * ESS - "Empty Since Start" - Bucket has never been filled since the hash table was last created/rehashed.
- * EAR - "Empty After Removal" - Tombstone - Bucket is empty, but has been filled since HashTable was last created/rehashed.
- *
- * @return type of hash table bucket.
- */
-HashTable::HashTableBucket::BucketType HashTable::HashTableBucket::getType() const {
-    return type;
 }
 
 /**
@@ -365,6 +456,8 @@ void HashTable::HashTableBucket::load(const std::string& inKey, const size_t& in
  * @brief Empties bucket
  *
  * Marks bucket as EAR, effectively rendering its contents inaccessible.
+ *
+ * @warning The key-value pair remain in memory and may be accessed using getKey(), getValue(), or [].
  */
 void HashTable::HashTableBucket::unload() {
     this->type = BucketType::EAR;
@@ -375,7 +468,8 @@ void HashTable::HashTableBucket::unload() {
  *
  * Outputs bucket content in the form "<key, value>"
  *
- * @warning If empty bucket is read, resulting output will be "<,0>".
+ * @warning Does not check if bucket is empty.
+ *
  * @param os output stream
  * @param bucket hash table bucket to be output
  * @return output stream with bucket output added
