@@ -22,7 +22,7 @@ searches through the table using pseudo-random probing until it either:
 2. Finds a bucket marked ESS.
 3. Searches every bucket in the table. 
 
-The last case only occurs if the key is not in the table and every bucket is full or every empty bucket is a tombstone.  
+The last case only occurs if the key is not in the table and every bucket is full or every empty bucket is a tombstone.
 All four methods then perform a different O(1) series of operations and return a different data type, but their time  
 complexity is tied to that of find. The insert method does not call find, but it does perform the same number of  
 searches for a specific key. It uses the same pseudo-random probing algorithm with the same three termination condtions  
@@ -46,6 +46,6 @@ have constant order time complexity. The testing further verifies that if an ave
 insert/remove is desired, then $\alpha$ = 0.5 is a good choice for the rehashing threshold for the hash table.
 
 While not requested by the project prompt and not explicitly tested, I expect the keys and rehash methods  
-all have O(N) time complexity given that each method must iterate over at least as many buckets as there are  
+both have O(N) time complexity given that each method must iterate over at least as many buckets as there are  
 key-value pairs in the table and cannot utilize the benefits of pseudo-random probing. All remaining public methods   
 should be O(1) time complexity.
